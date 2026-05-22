@@ -13,41 +13,63 @@ export default async function handler(req, res) {
     }
   }
 
-  const { email } = body || {};
+  const { email, profile, score } = body || {};
 
   if (!email || !email.includes('@')) {
     return res.status(400).json({ error: 'Valid email required' });
   }
 
   const pubId = process.env.BEEHIIV_PUB_ID;
-  if (!pubId) {
-    return res.status(500).json({ error: 'Publication ID not configured' });
+  const apiKey = process.env.BEEHIIV_API_KEY;
+
+  if (!pubId || !apiKey) {
+    console.error('Missing env vars:', { pubId: !!pubId, apiKey: !!apiKey });
+    return res.status(500).json({ error: 'Configuration error' });
   }
 
   try {
-    // Use Beehiiv's public subscribe form endpoint — no API key needed
-    const formData = new URLSearchParams();
-    formData.append('email', email);
+    const payload = {
+      email: email,
+      reactivate_existing: false,
+      send_welcome_email: true,
+      utm_source: 'clearpath-app',
+      utm_medium: 'email-capture',
+      utm_campaign: 'beta'
+    };
 
-    const response = await fetch(`https://www.beehiiv.com/subscribe/${pubId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-        'User-Agent': 'Clearpath/1.0'
-      },
-      body: formData.toString()
-    });
+    // Add custom fields if profile is provided
+    if (profile) {
+      payload.custom_fields = [
+        { name: 'profile', value: profile },
+        { name: 'score', value: score ? score.toString() : '0' }
+      ];
+    }
 
-    console.log('Beehiiv response status:', response.status);
-    const text = await response.text();
-    console.log('Beehiiv response:', text.slice(0, 200));
+    const response = await fetch(
+      `https://api.beehiiv.com/v2/publications/${pubId}/subscriptions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(payload)
+      }
+    );
 
-    // Beehiiv returns various responses — all are success from user perspective
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error('Beehiiv error:', response.status, JSON.stringify(data));
+      return res.status(200).json({ success: true }); // still show success to user
+    }
+
+    console.log('Subscribed:', email, 'profile:', profile);
     return res.status(200).json({ success: true });
 
   } catch (err) {
     console.error('Subscribe error:', err.message);
-    return res.status(200).json({ success: true, note: 'Queued' });
+    return res.status(200).json({ success: true });
   }
 }
